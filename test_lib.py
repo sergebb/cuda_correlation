@@ -4,6 +4,7 @@ import numpy as np
 import scipy as sp
 import sys
 import re
+import time
 import proj
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -13,6 +14,14 @@ BIN_SIZE=4
 IMG_SIZE_X=1025
 IMG_SIZE_Y=1045
         
+class Timer:    
+    def __enter__(self):
+        self.start = time.clock()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.clock()
+        self.interval = self.end - self.start
 
 def Correlate2d(data):
     # return np.array([sp.correlate(p, np.concatenate((p,p))) for p in data])
@@ -45,11 +54,13 @@ def main():
         size_y,size_x = considred_data.shape
         ccf_2d_c_bind = np.zeros(size_y*size_x,dtype=np.float32).reshape((size_y, size_x))
 
-        libcorr.Correlate(considred_data,ccf_2d_c_bind)
+        with Timer() as t:
+            libcorr.Correlate(considred_data,ccf_2d_c_bind)
 
-        print considred_data
-        print ccf_2d_np
-        print ccf_2d_c_bind
+        print('Function call took %.03f sec.' % t.interval)
+        # print considred_data
+        # print ccf_2d_np
+        # print ccf_2d_c_bind
         
         img = plt.imshow( ccf_2d_c_bind )
         plt.colorbar()

@@ -78,6 +78,13 @@ int CudaCorrelate( float** input_data, float** output_data, int rows, int cols)
         exit( -1 );
     }
 
+    cudaEvent_t start, stop;
+    float time;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start, 0);
+
     //Calculation    
     dim3 dimBlock( BLOCK_SIZE, 1 );
     dim3 dimGrid( cols/BLOCK_SIZE + ((cols%BLOCK_SIZE==0)?0:1), rows );
@@ -89,6 +96,12 @@ int CudaCorrelate( float** input_data, float** output_data, int rows, int cols)
         fprintf( stderr, "Error at %s:%i : %s\n", __FILE__, __LINE__, cudaGetErrorString( err ) );
         exit( -1 );
     }
+
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf ("Kernel execution time: %f ms\n", time);
+
 
     //Result memory copying back
     for( int i=0; i<rows; i++ ){
