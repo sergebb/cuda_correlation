@@ -25,16 +25,16 @@ class Timer:
 
 def Correlate2d(data):
     # return np.array([sp.correlate(p, np.concatenate((p,p))) for p in data])
-    # return np.array([np.sum((sp.correlate(q, np.concatenate((p,p))) for p in data),axis=0) for n,q in enumerate(data)])
-    s = []
-    for n,q in enumerate(data):
-        c_tmp = []
-        for p in data:
-            c = sp.correlate(q, np.concatenate((p,p)))
-            c_tmp.append(c[:-1])
-        s.append(np.sum(c_tmp,axis=0))
+    return np.array([np.sum((sp.correlate(q, np.concatenate((p,p[:-1]))) for p in data),axis=0) for n,q in enumerate(data)])
+    # s = []
+    # for n,q in enumerate(data):
+    #     c_tmp = []
+    #     for p in data:
+    #         c = sp.correlate(q, np.concatenate((p,p)))
+    #         c_tmp.append(c[:-1])
+    #     s.append(np.sum(c_tmp,axis=0))
 
-    return np.array(s)
+    # return np.array(s)
 
 def main():
     lim = 26
@@ -50,14 +50,16 @@ def main():
         limit_edge_inner,limit_edge_outer = proj.GetEdgesForPolarByIntensity(polar_data,limit_edge)
 
         considred_data = polar_data[limit_edge_inner:limit_edge_outer]
-        ccf_2d_np = Correlate2d( considred_data )
+        with Timer() as t:
+            ccf_2d_np = Correlate2d( considred_data )
+        print('Numpy correlation call took %.03f sec.' % t.interval)
         size_y,size_x = considred_data.shape
         ccf_2d_c_bind = np.zeros(size_y*size_x,dtype=np.float32).reshape((size_y, size_x))
 
         with Timer() as t:
             libcorr.Correlate(considred_data,ccf_2d_c_bind)
 
-        print('Function call took %.03f sec.' % t.interval)
+        print('Cuda function call took %.03f sec.' % t.interval)
         # print considred_data
         # print ccf_2d_np
         # print ccf_2d_c_bind

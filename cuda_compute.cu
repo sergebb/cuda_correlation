@@ -88,7 +88,7 @@ int CudaCorrelate( float** input_data, float** output_data, int rows, int cols)
     //Calculation    
     dim3 dimBlock( BLOCK_SIZE, 1 );
     dim3 dimGrid( cols/BLOCK_SIZE + ((cols%BLOCK_SIZE==0)?0:1), rows );
-    printf("block(%d,%d) and grid(%d,%d), cols=%d, rows=%d\n",dimBlock.x,dimBlock.y,dimGrid.x,dimGrid.y,cols,rows);
+    // printf("block(%d,%d) and grid(%d,%d), cols=%d, rows=%d\n",dimBlock.x,dimBlock.y,dimGrid.x,dimGrid.y,cols,rows);
     gCorrelationCompute<<<dimGrid,dimBlock>>>( dev_input, dev_output, rows, cols, pitch );
     // hello<<<dimGrid, dimBlock>>>(ad, bd);
     err = cudaDeviceSynchronize();
