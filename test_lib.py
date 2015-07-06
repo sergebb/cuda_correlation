@@ -36,6 +36,24 @@ def Correlate2d(data):
 
     # return np.array(s)
 
+def correlate_by_angle(data):
+    arr = np.zeros(data.shape)
+    for l,p in enumerate(data):
+        for i in range(len(p)):
+            p2 = np.roll(p,i)
+            c = sp.correlate(p, p2)
+            n = np.count_nonzero(np.multiply(p,p2))
+
+            if n is 0:
+                # print c,n
+                n = 1
+
+            arr[l,i] = c/float(n)
+
+        # c = sp.correlate(p, np.concatenate((p, p)))/float(np.count_nonzero(p))
+
+    return arr
+
 def main():
     lim = 26
     input = None
@@ -51,28 +69,38 @@ def main():
 
         considred_data = polar_data[limit_edge_inner:limit_edge_outer]
         with Timer() as t:
-            ccf_2d_np = Correlate2d( considred_data )
+            ccf_2d_np = correlate_by_angle( considred_data )
         print('Numpy correlation call took %.03f sec.' % t.interval)
-        size_y,size_x = considred_data.shape
-        ccf_2d_c_bind = np.zeros(size_y*size_x,dtype=np.float32).reshape((size_y, size_x))
+        # ccf_2d_c_bind = np.zeros_like(considred_data)
+        ccf_line_c_bind = np.zeros_like(considred_data)
+
+        # with Timer() as t:
+        #     libcorr.CorrelateFull(considred_data,ccf_2d_c_bind)
+
+        # print('Cuda function call took %.03f sec.' % t.interval)
 
         with Timer() as t:
-            libcorr.Correlate(considred_data,ccf_2d_c_bind)
+            libcorr.CorrelateLine(considred_data,ccf_line_c_bind)
 
-        print('Cuda function call took %.03f sec.' % t.interval)
+        print('Cuda function for line correlation call took %.03f sec.' % t.interval)
         # print considred_data
-        # print ccf_2d_np
-        # print ccf_2d_c_bind
-        
-        img = plt.imshow( ccf_2d_c_bind )
-        plt.colorbar()
-        plt.pause(10)
-        plt.draw()
+        print ccf_2d_np[0,:]
+        print ccf_line_c_bind[0,:]
 
-        img = plt.imshow( ccf_2d_np )
+        img = plt.imshow( ccf_line_c_bind )
         plt.colorbar()
         plt.pause(10)
         plt.draw()
+        
+        # img = plt.imshow( ccf_2d_c_bind )
+        # plt.colorbar()
+        # plt.pause(10)
+        # plt.draw()
+
+        # img = plt.imshow( ccf_2d_np )
+        # plt.colorbar()
+        # plt.pause(10)
+        # plt.draw()
 
 if __name__ == '__main__':
     main()

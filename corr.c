@@ -13,18 +13,18 @@ namespace { // Avoid cluttering the global namespace.
     std::string greet() { return "hello, world"; }
     int square(int number) { return number * number; }
 
-    void CorrealateLine(float* data,float* newdata,int size){
-        float sum;
-        int i,j,p;
-        for ( i=0; i<size; i++ ){
-            sum=0;
-            for ( j=0; j<size; j++ ){
-                p = (i+j)%size;
-                sum+=data[j]*data[p];
-            }
-            newdata[i]=sum;
-        }
-    }
+    // void CorrealateLine(float* data,float* newdata,int size){
+    //     float sum;
+    //     int i,j,p;
+    //     for ( i=0; i<size; i++ ){
+    //         sum=0;
+    //         for ( j=0; j<size; j++ ){
+    //             p = (i+j)%size;
+    //             sum+=data[j]*data[p];
+    //         }
+    //         newdata[i]=sum;
+    //     }
+    // }
 
     void CorrealateArray(float** input_data,float** output_data, int rows, int cols){
         float *line_1,*line_2;
@@ -56,7 +56,7 @@ namespace { // Avoid cluttering the global namespace.
         delete[] tmp_line;
     }
 
-    void Correalate( boost::python::numeric::array& data, boost::python::numeric::array& newdata )
+    void CorrealateFull( boost::python::numeric::array& data, boost::python::numeric::array& newdata )
     {
 
         PyArrayObject *ptr      = (PyArrayObject *) data.ptr();   //Get numpy data ptr
@@ -101,7 +101,7 @@ namespace { // Avoid cluttering the global namespace.
             foutput[n] = static_cast<float*> PyArray_GETPTR2(new_ptr, n, 0);
         }
         // CorrealateArray(finput,foutput,rows,cols);
-        CudaCorrelate(finput,foutput,rows,cols);
+        CudaCorrelateFull(finput,foutput,rows,cols);
         // float* newline = new float[cols];
         // for ( int n=0; n<rows; n++ ){
         //     float *line = static_cast<float*> PyArray_GETPTR2(ptr, n, 0);
@@ -118,6 +118,60 @@ namespace { // Avoid cluttering the global namespace.
         return;
         
     }
+
+    void CorrealateLine( boost::python::numeric::array& data, boost::python::numeric::array& newdata )
+    {
+
+        PyArrayObject *ptr      = (PyArrayObject *) data.ptr();   //Get numpy data ptr
+        PyArrayObject *new_ptr  = (PyArrayObject *) newdata.ptr();
+        if (ptr == NULL) {
+            std::cerr << "Could not get NP array." << std::endl;
+            return;
+        }
+        if (new_ptr == NULL) {
+            std::cerr << "Could not get NP array." << std::endl;
+            return;
+        }
+        const int dims     =  PyArray_NDIM(ptr);    //Get numpy array dimension
+        const int new_dims =  PyArray_NDIM(new_ptr);    //Get numpy array dimension
+        if (dims != 2){
+            std::cerr << "Wrong dimension on array." << std::endl;
+            return;
+        }
+        if (dims != new_dims){
+            std::cerr << "Wrong dimension on new array." << std::endl;
+            return;
+        }
+        int rows = *(PyArray_DIMS(ptr));        //Get numpy array size
+        int cols = *(PyArray_DIMS(ptr)+1);
+        int new_rows = *(PyArray_DIMS(new_ptr));        //Get numpy array size
+        int new_cols = *(PyArray_DIMS(new_ptr)+1);
+
+        if (rows != new_rows || cols != new_cols ){
+            std::cerr << "Wrong shape of the new array." << std::endl;
+            return;
+        }
+
+        if (ptr->descr->elsize != sizeof(float) || new_ptr->descr->elsize != sizeof(float)){   //Test numpy array type
+            std::cerr << "Must be numpy.float32 ndarray" << std::endl;
+            return;
+        }
+
+        float **finput = new float*[rows];
+        float **foutput = new float*[rows];
+        for ( int n=0; n<rows; n++ ){
+            finput[n] = static_cast<float*> PyArray_GETPTR2(ptr, n, 0);
+            foutput[n] = static_cast<float*> PyArray_GETPTR2(new_ptr, n, 0);
+        }
+
+        CudaCorrelateLine(finput,foutput,rows,cols);
+
+        delete[] finput;
+        delete[] foutput;
+
+        return;
+        
+    }
 }
 
 
@@ -127,5 +181,6 @@ BOOST_PYTHON_MODULE(libcorr)
     // Add regular functions to the module.
     def("greet", greet);
     def("square", square);
-    def("Correlate", Correalate);
+    def("CorrelateFull", CorrealateFull);
+    def("CorrelateLine", CorrealateLine);
 }
