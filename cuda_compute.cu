@@ -113,6 +113,7 @@ void gApplyNorm( float *dev_output, int *dev_norm, int rows, int cols, size_t pi
     if( xCoord<cols && yCoord<rows){
         p = (float*)((char*)dev_output + yCoord * pitchF) + xCoord;  
         norm = (int*)((char*)dev_norm + yCoord * pitchI) + xCoord;  
+        if( *norm == 0 ) *norm = 1;
         *p = *p / *norm;
     }
 }
@@ -148,12 +149,12 @@ int CudaCorrelateFull( float** input_data, float** output_data, int rows, int co
         exit( -1 );
     }
 
-    cudaEvent_t start, stop;
-    float time;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    // cudaEvent_t start, stop;
+    // float time;
+    // cudaEventCreate(&start);
+    // cudaEventCreate(&stop);
 
-    cudaEventRecord(start, 0);
+    // cudaEventRecord(start, 0);
 
     //Calculation    
     dim3 dimBlock( BLOCK_SIZE, 1 );
@@ -167,10 +168,10 @@ int CudaCorrelateFull( float** input_data, float** output_data, int rows, int co
         exit( -1 );
     }
 
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&time, start, stop);
-    printf ("Kernel execution time: %f ms\n", time);
+    // cudaEventRecord(stop, 0);
+    // cudaEventSynchronize(stop);
+    // cudaEventElapsedTime(&time, start, stop);
+    // printf ("Kernel execution time: %f ms\n", time);
 
 
     //Result memory copying back
