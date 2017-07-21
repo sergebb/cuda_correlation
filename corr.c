@@ -102,32 +102,23 @@ namespace { // Avoid cluttering the global namespace.
             std::cerr << "polar_data shape[0] should be equal to " << (r_max - r_min) << std::endl;
             return;
         }
+        
 
-        float **finput = new float*[rows];
-        float **foutput = new float*[rows];
-        for ( int n=0; n<rows; n++ ){
-            finput[n] = static_cast<float*> PyArray_GETPTR2(ptr, n, 0);
-            foutput[n] = static_cast<float*> PyArray_GETPTR2(polar_ptr, n, 0);
-        }
+        float *finput = (float *)PyArray_BYTES(ptr);
+        float *foutput = (float *)PyArray_BYTES(polar_ptr);
+        size_t input_row_stride = PyArray_STRIDES(ptr)[0];
+        size_t polar_row_stride = PyArray_STRIDES(polar_ptr)[0];
 
-        CudaReprojectToPolar(finput, foutput, rows, cols, r_min, r_max, polar_angles, center_y, center_x, cval);
-
-        delete[] finput;
-        delete[] foutput;
+        CudaReprojectToPolar(finput, input_row_stride, foutput, polar_row_stride, rows, cols, r_min, r_max, polar_angles, center_y, center_x, cval);
 
         return;
     }
     
-    void CorrealateLine( boost::python::numeric::array& data, boost::python::numeric::array& mask, boost::python::numeric::array& newdata )
+    void CorrealateLine( boost::python::numeric::array& data, boost::python::numeric::array& newdata )
     {
         PyArrayObject *ptr      = (PyArrayObject *) data.ptr();   //Get numpy data ptr
-        PyArrayObject *mask_ptr = (PyArrayObject *) mask.ptr();
         PyArrayObject *new_ptr  = (PyArrayObject *) newdata.ptr();
         if (ptr == NULL) {
-            std::cerr << "Could not get NP array." << std::endl;
-            return;
-        }
-        if (mask_ptr == NULL) {
             std::cerr << "Could not get NP array." << std::endl;
             return;
         }
@@ -136,64 +127,53 @@ namespace { // Avoid cluttering the global namespace.
             return;
         }
         const int dims     =  PyArray_NDIM(ptr);    //Get numpy array dimension
-        const int mask_dims     =  PyArray_NDIM(mask_ptr);    //Get numpy array dimension
         const int new_dims =  PyArray_NDIM(new_ptr);    //Get numpy array dimension
         if (dims != 2){
             std::cerr << "Wrong dimension on array." << std::endl;
             return;
         }
-        if (dims != mask_dims || dims != new_dims){
+        if (dims != new_dims){
             std::cerr << "Arrays have different shape." << std::endl;
             return;
         }
         int rows = *(PyArray_DIMS(ptr));        //Get numpy array size
         int cols = *(PyArray_DIMS(ptr)+1);
-        int mask_rows = *(PyArray_DIMS(mask_ptr));        //Get numpy array size
-        int mask_cols = *(PyArray_DIMS(mask_ptr)+1);
         int new_rows = *(PyArray_DIMS(new_ptr));        //Get numpy array size
         int new_cols = *(PyArray_DIMS(new_ptr)+1);
 
-        if (rows != mask_rows || cols != mask_cols || rows != new_rows || cols != new_cols ){
+        if (rows != new_rows || cols != new_cols ){
             std::cerr << "Arrays have different shape." << std::endl;
             return;
         }
 
         if (ptr->descr->elsize != sizeof(float) //Test numpy array type
-            || mask_ptr->descr->elsize != sizeof(float)
             || new_ptr->descr->elsize != sizeof(float))
         {
             std::cerr << "Must be numpy.float32 ndarray" << std::endl;
             return;
         }
 
-        float **finput = new float*[rows];
-        float **fmask = new float*[rows];
-        float **foutput = new float*[rows];
-        for ( int n=0; n<rows; n++ ){
-            finput[n] = static_cast<float*> PyArray_GETPTR2(ptr, n, 0);
-            fmask[n] = static_cast<float*> PyArray_GETPTR2(mask_ptr, n, 0);
-            foutput[n] = static_cast<float*> PyArray_GETPTR2(new_ptr, n, 0);
+        float *finput = (float *)PyArray_BYTES(ptr);
+        float *foutput = (float *)PyArray_BYTES(new_ptr);
+        size_t input_row_stride = PyArray_STRIDES(ptr)[0];
+        size_t output_row_stride = PyArray_STRIDES(new_ptr)[0];
+        
+        if (input_row_stride != output_row_stride)
+        {
+            std::cerr << "Arrays have different stride" << std::endl;
+            return;
         }
-
-        CudaCorrelateLine(finput, fmask, foutput, rows, cols);
-
-        delete[] finput;
-        delete[] fmask;
-        delete[] foutput;
+        CudaCorrelateLine(finput, foutput, input_row_stride, rows, cols);
 
         return;
     }
-    void ReprojectAndCorrealate(boost::python::numeric::array& data, boost::python::numeric::array& mask, boost::python::numeric::array& ccf_data,
+    
+    void ReprojectAndCorrealate(boost::python::numeric::array& data, boost::python::numeric::array& ccf_data,
                                 float center_y, float center_x, float r_min, float r_max, float cval )
     {
         PyArrayObject *ptr      = (PyArrayObject *) data.ptr();   //Get numpy data ptr
-        PyArrayObject *mask_ptr = (PyArrayObject *) mask.ptr();
         PyArrayObject *ccf_ptr  = (PyArrayObject *) ccf_data.ptr();
         if (ptr == NULL) {
-            std::cerr << "Could not get NP array." << std::endl;
-            return;
-        }
-        if (mask_ptr == NULL) {
             std::cerr << "Could not get NP array." << std::endl;
             return;
         }
@@ -202,56 +182,60 @@ namespace { // Avoid cluttering the global namespace.
             return;
         }
         const int dims      = PyArray_NDIM(ptr);        //Get numpy array dimension
-        const int mask_dims = PyArray_NDIM(mask_ptr);   //Get numpy array dimension
         const int new_dims  = PyArray_NDIM(ccf_ptr);    //Get numpy array dimension
-        if (dims != 2){
+        if (dims != 2 && dims != 3){
             std::cerr << "Wrong dimension on array." << std::endl;
             return;
         }
-        if (dims != mask_dims){
-            std::cerr << "Arrays have different shape." << std::endl;
-            return;
-        }
-        if (new_dims != 1){
+        if (new_dims != dims-1){
             std::cerr << "Wrong dimension on output array." << std::endl;
             return;
         }
-        int rows = *(PyArray_DIMS(ptr));        //Get numpy array shape
-        int cols = *(PyArray_DIMS(ptr)+1);
-        int mask_rows = *(PyArray_DIMS(mask_ptr));
-        int mask_cols = *(PyArray_DIMS(mask_ptr)+1);
-        int polar_angles = *(PyArray_DIMS(ccf_ptr));
-
-        if (rows != mask_rows || cols != mask_cols){
-            std::cerr << "Arrays have different shape." << std::endl;
-            return;
+        int rows, cols, polar_angles, num_images, num_ccf;
+        if(dims == 2){
+            rows = *(PyArray_DIMS(ptr));        //Get numpy array shape
+            cols = *(PyArray_DIMS(ptr)+1);
+            polar_angles = *(PyArray_DIMS(ccf_ptr));
+        }else{ // dims == 3
+            num_images = *(PyArray_DIMS(ptr));
+            rows = *(PyArray_DIMS(ptr)+1);        
+            cols = *(PyArray_DIMS(ptr)+2);
+            num_ccf = *(PyArray_DIMS(ccf_ptr));
+            polar_angles = *(PyArray_DIMS(ccf_ptr)+1);
+            if (num_images != num_ccf){
+                std::cerr << "Arrays shape do not correspond to each other." << std::endl;
+                return;
+            }
         }
 
         if (ptr->descr->elsize != sizeof(float) //Test numpy array type
-            || mask_ptr->descr->elsize != sizeof(float)
             || ccf_ptr->descr->elsize != sizeof(float))
         {
             std::cerr << "Must be numpy.float32 ndarray" << std::endl;
-            std::cerr << "CCF type size is " << ccf_ptr->descr->elsize << std::endl;
             return;
         }
+        
+        
+        if(dims == 2){
+            float *finput = (float *)PyArray_BYTES(ptr);
+            float *foutput = (float *)PyArray_BYTES(ccf_ptr);
+            size_t input_row_stride = PyArray_STRIDES(ptr)[0];
 
-        float **finput = new float*[rows];
-        float **fmask = new float*[rows];
-        float *foutput;
-        for ( int n=0; n<rows; n++ ){
-            finput[n] = static_cast<float*> PyArray_GETPTR2(ptr, n, 0);
-            fmask[n] = static_cast<float*> PyArray_GETPTR2(mask_ptr, n, 0);
+            CudaReprojectAndCorrelate(finput, input_row_stride, foutput, 
+                                      rows, cols, r_min, r_max, polar_angles,
+                                      center_y, center_x, cval);
+        }else{  // dims == 3
+            float *finput = (float *)PyArray_BYTES(ptr);
+            float *foutput = (float *)PyArray_BYTES(ccf_ptr);
+            size_t input_image_stride = PyArray_STRIDES(ptr)[0];
+            size_t input_row_stride = PyArray_STRIDES(ptr)[1];
+            size_t output_row_stride = PyArray_STRIDES(ccf_ptr)[0];
+
+            CudaReprojectAndCorrelateArray(finput, num_images, input_image_stride, input_row_stride,
+                                           foutput, output_row_stride,
+                                           rows, cols, r_min, r_max, polar_angles,
+                                           center_y, center_x, cval);
         }
-        foutput = static_cast<float*> PyArray_GETPTR1(ccf_ptr,0);
-
-        CudaReprojectAndCorrelate(finput, fmask, foutput, 
-                                  rows, cols, r_min, r_max, polar_angles,
-                                  center_y, center_x, cval);
-
-        delete[] finput;
-        delete[] fmask;
-
         return;
     }
 }

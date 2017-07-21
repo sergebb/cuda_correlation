@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#!/usr/bin/env python
 
 import sys
 import time
@@ -48,102 +48,76 @@ def RecoverGap(polar_data,polar_mask):
 
 def main():
     lim = 26
-    input = None
-    for i in range(25, lim):
+    image_data = []
+    for i in range(1, 10):
         sys.stderr.write('%d\n' % i)
-        image_data = np.fromfile('../shuffeled_2/%.04d.raw' % i, \
+        image = np.fromfile('../shuffeled_2/%.04d.raw' % i, \
                                 dtype=np.float32).reshape((IMG_SIZE_Y, IMG_SIZE_X))
+        image[image < 0] = 0
+        # image[500:540, :] = -10000
+        image_data.append(image)
 
-        mask = np.zeros_like(image_data)
-        mask[:,500:560] = -10000
-        size_y, size_x = image_data.shape
+    image_data = np.array(image_data, dtype=np.float32)
 
-        origin = (IMG_SIZE_X/2.0, IMG_SIZE_Y/2.0)
-        with Timer() as t:
-            polar_data = proj.reproject_image_into_polar(image_data, origin)
+    num_images, size_y, size_x = image_data.shape
+
+    limit_edge_inner = 0
+    limit_edge_outer = min(size_x//4, size_y//4)
+    origin = (size_x/2.0, size_y/2.0)
+
+    ccf_data = []
+    cpu_ccf_2d_data = []
+    with Timer() as t:
+        for image in image_data:
+            mask = np.zeros_like(image)
+            mask[image < 0] = -10000
+
+            polar_data = proj.reproject_image_into_polar(image, origin)
             polar_mask = proj.reproject_image_into_polar(mask, origin)
-
-            limit_edge_inner = 50 + 10
-            limit_edge_outer = min(size_x//4, size_y//4)
 
             considred_data = polar_data[limit_edge_inner:limit_edge_outer]
             considred_mask = polar_mask[limit_edge_inner:limit_edge_outer]
+
             ccf_2d_np = proj.correlate_by_angle(considred_data, considred_mask)
             ccf_a = proj.combine_ccf_for_angles(ccf_2d_np)
+            ccf_data.append(ccf_a)
 
-        print('Numpy calculation took %.03f sec.' % t.interval)
+        ccf_data = np.array(ccf_data)
 
+    print('Numpy calculation took %.03f sec.' % t.interval)
 
-        # cuda_polar = np.zeros_like(considred_data)
-        ccf_line_c_bind = np.zeros_like(ccf_a,dtype=np.float32)
+    cpu_ccf_2d_data = np.array(cpu_ccf_2d_data)
 
-        with Timer() as t:
-            ccf_data = np.zeros_like(considred_data)
-            # libcorr.ReprojectToPolar(image_data, cuda_polar, origin[1], origin[0], limit_edge_inner, limit_edge_outer, 0)
-            # libcorr.ReprojectToPolar(mask, considred_mask, origin[1], origin[0], limit_edge_inner, limit_edge_outer, 0)
-            # libcorr.CorrelateLine(considred_data, considred_mask, ccf_line_c_bind)
-            libcorr.ReprojectAndCorrealate(image_data, mask, ccf_line_c_bind, origin[1], origin[0], limit_edge_inner, limit_edge_outer, 0)
+    gpu_ccf_data = np.zeros_like(ccf_data, dtype=np.float32)
 
-        print('Cuda calculation took %.03f sec.' % t.interval)
+    with Timer() as t:
+        libcorr.ReprojectAndCorrealate(image_data, gpu_ccf_data, origin[1], origin[0], limit_edge_inner, limit_edge_outer, 0)
+
+    print('Cuda calculation took %.03f sec.' % t.interval)
+
+    fig = plt.figure('Comparison')
+
+    for i in range(num_images):
+        ccf_cpu = ccf_data[i, :]
+        ccf_gpu = gpu_ccf_data[i, :]
+
+        ccf_cpu /= ccf_cpu[0]
+        ccf_gpu /= ccf_gpu[0]
 
         fig = plt.figure('Comparison')
-
-        # show first image
         ax1 = fig.add_subplot(1, 3, 1)
-        plt.plot(ccf_a)
-        # plt.colorbar()
+        plt.plot(ccf_cpu)
 
-        # show the second image
-        fig.add_subplot(1, 3, 2, sharex=ax1)
-        plt.plot(ccf_line_c_bind)
-        # plt.colorbar()
+        ax2 = fig.add_subplot(1, 3, 2, sharex=ax1)
+        plt.plot(ccf_gpu)
+        ax3 = fig.add_subplot(1, 3, 3, sharex=ax1)
+        plt.plot(ccf_cpu-ccf_gpu)
 
-        ax2 = fig.add_subplot(1, 3, 3, sharex=ax1)
-        plt.plot(ccf_line_c_bind-ccf_a)
-        # plt.colorbar()
+        ax1.set_ylim([0, 1])
+        ax2.set_ylim([0, 1])
+        ax3.set_ylim([0, 1])
 
-        # show the images
         plt.show()
-
-        # limit_edge_inner = 50 + 10
-        # limit_edge_outer = min(size_x//4, size_y//4)
-
-        # considred_data = polar_data[limit_edge_inner:limit_edge_outer]
-        # considred_mask = np.zeros_like(considred_data)
-        # considred_mask[:,230:260] = -10000
-        # with Timer() as t:
-        #     ccf_2d_np = proj.correlate_by_angle(considred_data, considred_mask)
-        # print('Numpy correlation call took %.03f sec.' % t.interval)
-        # ccf_line_c_bind = np.zeros_like(considred_data)
-
-        # recovered_data = RecoverGap(considred_data,considred_mask)
-
-        # with Timer() as t:
-        #     libcorr.CorrelateFull(considred_data,ccf_2d_c_bind)
-
-        # print('Cuda function call took %.03f sec.' % t.interval)
-
-        # with Timer() as t:
-        #     libcorr.CorrelateLine(considred_data, considred_mask, ccf_line_c_bind)
-
-        # print('Cuda function for line correlation call took %.03f sec.' % t.interval)
-        # # print considred_data
-        # print ccf_2d_np[0,:20]
-        # print ccf_line_c_bind[0,:20]
-
-        # img = plt.imshow( ccf_2d_np - ccf_line_c_bind )
-        # plt.colorbar()
-        # plt.show()
-
-        # img = plt.imshow(ccf_2d_c_bind)
-        # plt.colorbar()
-        # plt.pause(10)
-        # plt.draw()
-
-        # img = plt.imshow( ccf_2d_np )
-        # plt.colorbar()
-        # plt.pause(10)
-        # plt.draw()
 
 if __name__ == '__main__':
     main()
