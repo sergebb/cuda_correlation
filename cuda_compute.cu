@@ -4,6 +4,7 @@
  
 #define BLOCK_SIZE 512
 #define MAX_WIDTH 2048
+#define MAX_TEXTURE_HEIGHT 65536
 
 texture<float, 2 > inputDataTexRef;
 
@@ -353,25 +354,37 @@ int CudaReprojectAndCorrelateArray(float* input_data, int num_images, size_t inp
     CUDA_CHECK(cudaMallocPitch((void**)&dev_ccf_2d, &pitchPolar, sizeof(float)*polar_angles, r_max-r_min));
     CUDA_CHECK(cudaMallocPitch((void**)&dev_ccf_angle, &pitchPolar, sizeof(float)*polar_angles, num_images));
     
-    // Specify texture    
-    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
-    CUDA_CHECK(cudaBindTexture2D(NULL, inputDataTexRef, dev_input, channelDesc, cols, rows*num_images, pitchInput));
-    inputDataTexRef.addressMode[0] = cudaAddressModeBorder;
-    inputDataTexRef.addressMode[1] = cudaAddressModeBorder;
-    inputDataTexRef.filterMode = cudaFilterModeLinear;
-    inputDataTexRef.normalized = false;
+    // Texture requirements    
+    int batch_n;
+    if( num_images*rows >= MAX_TEXTURE_HEIGHT ){ //Texture height is not enough
+        batch_n = MAX_TEXTURE_HEIGHT/rows;
+    }else{
+        batch_n = num_images;
+    }
 
     //Memory copying&initialisation for input data and error-check
     CUDA_CHECK(cudaMemcpy2D(dev_input, pitchInput, input_data, input_row_stride, sizeof(float)*cols, rows*num_images, cudaMemcpyHostToDevice));
 
+    int textureImageStride = -batch_n; //Force texture respecification on first iteration
     for(int n=0; n<num_images; n++){
+        if( (n - textureImageStride) >= batch_n ){ // Respecify texture
+            textureImageStride = n;
+            cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+            CUDA_CHECK(cudaBindTexture2D(NULL, inputDataTexRef, (float *)((char *)dev_input + textureImageStride*rows*pitchInput), channelDesc, cols, rows*batch_n, pitchInput));
+            inputDataTexRef.addressMode[0] = cudaAddressModeBorder;
+            inputDataTexRef.addressMode[1] = cudaAddressModeBorder;
+            inputDataTexRef.filterMode = cudaFilterModeLinear;
+            inputDataTexRef.normalized = false;
+            
+        }
+
         //Calculation    
         dim3 projBlock( 32, 32 );
         dim3 projGrid((r_max - r_min + projBlock.y - 1) / projBlock.y, 
                     (polar_angles + projBlock.x - 1) / projBlock.x);
 
         //Projection calculation
-        gComputePolarProjection<<<projGrid,projBlock>>>(dev_polar_input, pitchPolar, n,
+        gComputePolarProjection<<<projGrid,projBlock>>>(dev_polar_input, pitchPolar, n - textureImageStride,
                                                         rows, cols, r_min, r_max, polar_angles,
                                                         center_y, center_x, 0);
         

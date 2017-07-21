@@ -49,7 +49,7 @@ def RecoverGap(polar_data,polar_mask):
 def main():
     lim = 26
     image_data = []
-    for i in range(1, 10):
+    for i in range(1, 300):
         sys.stderr.write('%d\n' % i)
         image = np.fromfile('../shuffeled_2/%.04d.raw' % i, \
                                 dtype=np.float32).reshape((IMG_SIZE_Y, IMG_SIZE_X))
@@ -66,7 +66,6 @@ def main():
     origin = (size_x/2.0, size_y/2.0)
 
     ccf_data = []
-    cpu_ccf_2d_data = []
     with Timer() as t:
         for image in image_data:
             mask = np.zeros_like(image)
@@ -86,7 +85,7 @@ def main():
 
     print('Numpy calculation took %.03f sec.' % t.interval)
 
-    cpu_ccf_2d_data = np.array(cpu_ccf_2d_data)
+    # cpu_ccf_2d_data = np.array(cpu_ccf_2d_data)
 
     gpu_ccf_data = np.zeros_like(ccf_data, dtype=np.float32)
 
@@ -97,27 +96,34 @@ def main():
 
     fig = plt.figure('Comparison')
 
-    for i in range(num_images):
-        ccf_cpu = ccf_data[i, :]
-        ccf_gpu = gpu_ccf_data[i, :]
+    # for i in range(num_images):
+    #     ccf_cpu = ccf_data[i, :]
+    #     ccf_gpu = gpu_ccf_data[i, :]
 
-        ccf_cpu /= ccf_cpu[0]
-        ccf_gpu /= ccf_gpu[0]
+    #     ccf_cpu /= ccf_cpu[0]
+    #     ccf_gpu /= ccf_gpu[0]
 
-        fig = plt.figure('Comparison')
-        ax1 = fig.add_subplot(1, 3, 1)
-        plt.plot(ccf_cpu)
+    #     fig = plt.figure('Comparison')
+    #     ax1 = fig.add_subplot(1, 3, 1)
+    #     plt.plot(ccf_cpu)
+    #     # plt.imshow(ccf_data)
+    #     # plt.colorbar()
 
-        ax2 = fig.add_subplot(1, 3, 2, sharex=ax1)
-        plt.plot(ccf_gpu)
-        ax3 = fig.add_subplot(1, 3, 3, sharex=ax1)
-        plt.plot(ccf_cpu-ccf_gpu)
+    #     ax2 = fig.add_subplot(1, 3, 2, sharex=ax1)
+    #     plt.plot(ccf_gpu)
+    #     # plt.imshow(gpu_ccf_data)
+    #     # plt.colorbar()
 
-        ax1.set_ylim([0, 1])
-        ax2.set_ylim([0, 1])
-        ax3.set_ylim([0, 1])
+    #     ax3 = fig.add_subplot(1, 3, 3, sharex=ax1)
+    #     plt.plot(ccf_cpu-ccf_gpu)
+    #     # plt.imshow(ccf_data-gpu_ccf_data)
+    #     # plt.colorbar()
 
-        plt.show()
+    #     ax1.set_ylim([0, 1])
+    #     ax2.set_ylim([0, 1])
+    #     ax3.set_ylim([0, 1])
+
+    #     plt.show()
 
 if __name__ == '__main__':
     main()
