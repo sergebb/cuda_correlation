@@ -123,7 +123,13 @@ void gRecoverMask( float *dev_input, int rows, int cols, size_t pitchInput)
         non_mask_buf[0] = non_mask;
     }
     __syncthreads();
-    average_val = sum_buf[0]/non_mask_buf[0];
+    non_mask = non_mask_buf[0];
+    sum_value = sum_buf[0];
+    if(non_mask == 0) {
+        average_val = 0;
+    }else{ 
+        average_val = sum_value/non_mask;
+    }
     
     for(i=0; i*BLOCK_SIZE < cols; i++){
         if(xCoord + i*BLOCK_SIZE < cols){
@@ -135,34 +141,53 @@ void gRecoverMask( float *dev_input, int rows, int cols, size_t pitchInput)
     }
 }
 __global__
-void gCCFAngle(float *dev_ccf_2d, float *dev_ccf_angle, int radius_range, size_t pitchF){
+void gCCFAngle(float *dev_ccf_2d, float *dev_ccf_angle, int polar_angles, int radius_range, size_t pitchF){
     int xCoord = blockIdx.x;
     int yCoord = threadIdx.y;
     int i,s;
     __shared__ float sum_buf[BLOCK_SIZE];
     float sum_value = 0;
     
-    for(i=0; i*BLOCK_SIZE < radius_range; i++){
-        if(yCoord + i*BLOCK_SIZE < radius_range){
-            sum_buf[yCoord] = *((float*)((char*)dev_ccf_2d + (yCoord + i*BLOCK_SIZE) * pitchF) + xCoord);
-        }else{
-            sum_buf[yCoord] = 0;
-        }
-        for( s=1; s<BLOCK_SIZE; s*=2) {         //Sum reduction
-            if(yCoord % (2*s) == 0) {
-                sum_buf[yCoord] += sum_buf[yCoord + s];
+    if(xCoord < polar_angles){
+        for(i=0; i*BLOCK_SIZE < radius_range; i++){
+            if(yCoord + i*BLOCK_SIZE < radius_range){
+                sum_buf[yCoord] = *((float*)((char*)dev_ccf_2d + (yCoord + i*BLOCK_SIZE) * pitchF) + xCoord);
+            }else{
+                sum_buf[yCoord] = 0;
             }
-            __syncthreads();
+            for( s=1; s<BLOCK_SIZE; s*=2) {         //Sum reduction
+                if(yCoord % (2*s) == 0) {
+                    sum_buf[yCoord] += sum_buf[yCoord + s];
+                }
+                __syncthreads();
+            }
+            if(yCoord == 0){
+                sum_value += sum_buf[0];
+            }
         }
         if(yCoord == 0){
-            sum_value += sum_buf[0];
+            dev_ccf_angle[xCoord] = sum_value/radius_range;
         }
     }
-    if(yCoord == 0){
-        dev_ccf_angle[xCoord] = sum_value/radius_range;
-    }
-    
 }
+
+__global__
+void gRadAngle(float *dev_polar_input, float *dev_ccf_2d, float *dev_rad, int polar_angles, int radius_range, size_t pitchF){
+    int yCoord = blockDim.y*blockIdx.y + threadIdx.y;
+    int i;
+    float sum = 0;
+    float n;
+    float res;
+    if(yCoord < radius_range){
+        for(i=0; i<polar_angles; i++){
+            sum += *((float*)((char*)dev_polar_input + yCoord*pitchF) + i);
+        }
+        n = sum*sum/polar_angles;
+        res = *((float*)((char*)dev_ccf_2d + yCoord*pitchF))/(n==0 ? 1 : n);
+        dev_rad[yCoord] = res;
+    }
+}
+    
 
 
 int CudaReprojectToPolar(float *input_data, size_t input_row_stride, float *polar_data, size_t polar_row_stride,
@@ -254,11 +279,11 @@ int CudaCorrelateLine(float* input_data, float* output_data, size_t numpy_row_st
     return EXIT_SUCCESS;
 }
 
-int CudaReprojectAndCorrelate(float* input_data, size_t input_row_stride, float* output_data, 
+int CudaReprojectAndCorrelate(float* input_data, size_t input_row_stride, float* ccf_data, float* rad_data,
                               int rows, int cols, int r_min, int r_max, int polar_angles,
                               float center_y, float center_x, float cval)
 {
-    float *dev_input, *dev_polar_input, *dev_ccf_2d;
+    float *dev_input, *dev_polar_input, *dev_ccf_2d, *dev_rad;
     float *dev_ccf_angle;
     size_t pitchInput, pitchPolar;
     
@@ -275,6 +300,7 @@ int CudaReprojectAndCorrelate(float* input_data, size_t input_row_stride, float*
     CUDA_CHECK(cudaMallocPitch((void**)&dev_polar_input, &pitchPolar, sizeof(float)*polar_angles, r_max-r_min));
     CUDA_CHECK(cudaMallocPitch((void**)&dev_ccf_2d, &pitchPolar, sizeof(float)*polar_angles, r_max-r_min));
     CUDA_CHECK(cudaMalloc((void**)&dev_ccf_angle, sizeof(float)*polar_angles));
+    CUDA_CHECK(cudaMalloc((void**)&dev_rad, sizeof(float)*(r_max - r_min)));
 
     //Memory copying&initialisation for input data and error-check
     CUDA_CHECK(cudaMemcpy2D(dev_input, pitchInput, input_data, input_row_stride, sizeof(float)*cols, rows, cudaMemcpyHostToDevice));
@@ -308,13 +334,18 @@ int CudaReprojectAndCorrelate(float* input_data, size_t input_row_stride, float*
     dim3 corrBlock( BLOCK_SIZE, 1 );
     dim3 corrGrid( cols/BLOCK_SIZE + ((cols%BLOCK_SIZE==0)?0:1), rows );
     gCorrelationComputeLine<<<corrGrid,corrBlock>>>( dev_polar_input, dev_ccf_2d, r_max-r_min, polar_angles, pitchPolar);
-    
+
     dim3 angleBlock( 1, BLOCK_SIZE );
     dim3 angleGrid( polar_angles, 1 );
-    gCCFAngle<<<angleGrid,angleBlock>>>(dev_ccf_2d, dev_ccf_angle, r_max-r_min, pitchPolar);
+    gCCFAngle<<<angleGrid,angleBlock>>>(dev_ccf_2d, dev_ccf_angle, polar_angles, r_max-r_min, pitchPolar);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    CUDA_CHECK(cudaMemcpy( output_data, dev_ccf_angle, polar_angles*sizeof(float), cudaMemcpyDeviceToHost ));
+    dim3 radBlock( 1, BLOCK_SIZE );
+    dim3 radGrid( 1, (r_max - r_min + radBlock.y - 1) / radBlock.y );
+    gRadAngle<<<radGrid,radBlock>>>(dev_polar_input, dev_ccf_2d, dev_rad, polar_angles, r_max-r_min, pitchPolar);
+
+    CUDA_CHECK(cudaMemcpy(ccf_data, dev_ccf_angle, polar_angles*sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(rad_data, dev_rad, (r_max-r_min)*sizeof(float), cudaMemcpyDeviceToHost));
 
     // ///////////////////////////
     // cudaEventRecord(stop, 0);
@@ -332,13 +363,14 @@ int CudaReprojectAndCorrelate(float* input_data, size_t input_row_stride, float*
 }
 
 int CudaReprojectAndCorrelateArray(float* input_data, int num_images, size_t input_image_stride, size_t input_row_stride,
-                                   float* output_data, size_t output_row_stride,
+                                   float* ccf_data, size_t ccf_row_stride,
+                                   float* rad_data, size_t rad_row_stride,
                                    int rows, int cols, int r_min, int r_max, int polar_angles,
                                    float center_y, float center_x, float cval)
 {
-    float *dev_input, *dev_polar_input, *dev_ccf_2d;
+    float *dev_input, *dev_polar_input, *dev_ccf_2d, *dev_rad;
     float *dev_ccf_angle;
-    size_t pitchInput, pitchPolar;
+    size_t pitchInput, pitchPolar, pitchRadial;
     
     // ///////////////////////////
     // cudaEvent_t start, stop;
@@ -353,6 +385,7 @@ int CudaReprojectAndCorrelateArray(float* input_data, int num_images, size_t inp
     CUDA_CHECK(cudaMallocPitch((void**)&dev_polar_input, &pitchPolar, sizeof(float)*polar_angles, r_max-r_min));
     CUDA_CHECK(cudaMallocPitch((void**)&dev_ccf_2d, &pitchPolar, sizeof(float)*polar_angles, r_max-r_min));
     CUDA_CHECK(cudaMallocPitch((void**)&dev_ccf_angle, &pitchPolar, sizeof(float)*polar_angles, num_images));
+    CUDA_CHECK(cudaMallocPitch((void**)&dev_rad, &pitchRadial, sizeof(float)*(r_max - r_min), num_images));
     
     // Texture requirements    
     int batch_n;
@@ -399,10 +432,15 @@ int CudaReprojectAndCorrelateArray(float* input_data, int num_images, size_t inp
         
         dim3 angleBlock( 1, BLOCK_SIZE );
         dim3 angleGrid( polar_angles, 1 );
-        gCCFAngle<<<angleGrid,angleBlock>>>(dev_ccf_2d, (float *)((char *)dev_ccf_angle + n*pitchPolar), r_max-r_min, pitchPolar);
+        gCCFAngle<<<angleGrid,angleBlock>>>(dev_ccf_2d, (float *)((char *)dev_ccf_angle + n*pitchPolar), polar_angles, r_max-r_min, pitchPolar);
+        
+        dim3 radBlock( 1, BLOCK_SIZE );
+        dim3 radGrid( 1, (r_max - r_min + radBlock.y - 1) / radBlock.y );
+        gRadAngle<<<radGrid,radBlock>>>(dev_polar_input, dev_ccf_2d, (float *)((char *)dev_rad + n*pitchRadial), polar_angles, r_max-r_min, pitchPolar);
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        CUDA_CHECK(cudaMemcpy2D(output_data, output_row_stride, dev_ccf_angle, pitchPolar, polar_angles*sizeof(float), num_images, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy2D(ccf_data, ccf_row_stride, dev_ccf_angle, pitchPolar, polar_angles*sizeof(float), num_images, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy2D(rad_data, rad_row_stride, dev_rad, pitchRadial, (r_max - r_min)*sizeof(float), num_images, cudaMemcpyDeviceToHost));
     }
 
     // ///////////////////////////

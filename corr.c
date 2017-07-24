@@ -168,48 +168,62 @@ namespace { // Avoid cluttering the global namespace.
         return;
     }
     
-    void ReprojectAndCorrealate(boost::python::numeric::array& data, boost::python::numeric::array& ccf_data,
+    void ReprojectAndCorrealate(boost::python::numeric::array& data, boost::python::numeric::array& ccf_data, boost::python::numeric::array& rad_data,
                                 float center_y, float center_x, float r_min, float r_max, float cval )
     {
         PyArrayObject *ptr      = (PyArrayObject *) data.ptr();   //Get numpy data ptr
         PyArrayObject *ccf_ptr  = (PyArrayObject *) ccf_data.ptr();
-        if (ptr == NULL) {
-            std::cerr << "Could not get NP array." << std::endl;
-            return;
-        }
-        if (ccf_ptr == NULL) {
+        PyArrayObject *rad_ptr  = (PyArrayObject *) rad_data.ptr();
+        if (ptr == NULL || ccf_ptr == NULL || rad_ptr == NULL) {
             std::cerr << "Could not get NP array." << std::endl;
             return;
         }
         const int dims      = PyArray_NDIM(ptr);        //Get numpy array dimension
-        const int new_dims  = PyArray_NDIM(ccf_ptr);    //Get numpy array dimension
+        const int ccf_dims  = PyArray_NDIM(ccf_ptr);    //Get numpy array dimension
+        const int rad_dims  = PyArray_NDIM(rad_ptr);    //Get numpy array dimension
         if (dims != 2 && dims != 3){
             std::cerr << "Wrong dimension on array." << std::endl;
             return;
         }
-        if (new_dims != dims-1){
+        if (ccf_dims != dims-1){
             std::cerr << "Wrong dimension on output array." << std::endl;
             return;
         }
-        int rows, cols, polar_angles, num_images, num_ccf;
+        if (rad_dims != dims-1){
+            std::cerr << "Wrong dimension on radial output array." << std::endl;
+            return;
+        }
+        int rows, cols, polar_angles, num_images;
         if(dims == 2){
             rows = *(PyArray_DIMS(ptr));        //Get numpy array shape
             cols = *(PyArray_DIMS(ptr)+1);
             polar_angles = *(PyArray_DIMS(ccf_ptr));
+            int rad_range = *(PyArray_DIMS(rad_ptr));
+            if (rad_range != r_max - r_min){
+                std::cerr << "Radial array have wrong shape." << std::endl;
+                return;
+            }
         }else{ // dims == 3
             num_images = *(PyArray_DIMS(ptr));
             rows = *(PyArray_DIMS(ptr)+1);        
             cols = *(PyArray_DIMS(ptr)+2);
-            num_ccf = *(PyArray_DIMS(ccf_ptr));
+            int num_ccf = *(PyArray_DIMS(ccf_ptr));
             polar_angles = *(PyArray_DIMS(ccf_ptr)+1);
-            if (num_images != num_ccf){
+            int num_rad = *(PyArray_DIMS(rad_ptr));
+            int rad_range = *(PyArray_DIMS(rad_ptr)+1);
+            if (num_images != num_ccf || num_images != num_rad){
                 std::cerr << "Arrays shape do not correspond to each other." << std::endl;
+                return;
+            }
+            if (rad_range != r_max - r_min){
+                std::cerr << "Radial array have wrong shape." << std::endl;
                 return;
             }
         }
 
         if (ptr->descr->elsize != sizeof(float) //Test numpy array type
-            || ccf_ptr->descr->elsize != sizeof(float))
+            || ccf_ptr->descr->elsize != sizeof(float)
+            || rad_ptr->descr->elsize != sizeof(float))
         {
             std::cerr << "Must be numpy.float32 ndarray" << std::endl;
             return;
@@ -218,21 +232,25 @@ namespace { // Avoid cluttering the global namespace.
         
         if(dims == 2){
             float *finput = (float *)PyArray_BYTES(ptr);
-            float *foutput = (float *)PyArray_BYTES(ccf_ptr);
+            float *fccf = (float *)PyArray_BYTES(ccf_ptr);
+            float *frad = (float *)PyArray_BYTES(rad_ptr);
             size_t input_row_stride = PyArray_STRIDES(ptr)[0];
 
-            CudaReprojectAndCorrelate(finput, input_row_stride, foutput, 
+            CudaReprojectAndCorrelate(finput, input_row_stride, fccf, frad,
                                       rows, cols, r_min, r_max, polar_angles,
                                       center_y, center_x, cval);
         }else{  // dims == 3
             float *finput = (float *)PyArray_BYTES(ptr);
-            float *foutput = (float *)PyArray_BYTES(ccf_ptr);
+            float *fccf = (float *)PyArray_BYTES(ccf_ptr);
+            float *frad = (float *)PyArray_BYTES(rad_ptr);
             size_t input_image_stride = PyArray_STRIDES(ptr)[0];
             size_t input_row_stride = PyArray_STRIDES(ptr)[1];
-            size_t output_row_stride = PyArray_STRIDES(ccf_ptr)[0];
+            size_t ccf_row_stride = PyArray_STRIDES(ccf_ptr)[0];
+            size_t rad_row_stride = PyArray_STRIDES(rad_ptr)[0];
 
             CudaReprojectAndCorrelateArray(finput, num_images, input_image_stride, input_row_stride,
-                                           foutput, output_row_stride,
+                                           fccf, ccf_row_stride,
+                                           frad, rad_row_stride,
                                            rows, cols, r_min, r_max, polar_angles,
                                            center_y, center_x, cval);
         }
